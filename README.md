@@ -98,3 +98,15 @@ It produces:
 ### Optional next hardening
 
 - Code-sign the installer and app executable to reduce SmartScreen prompts.
+
+## Security Controls Implemented
+
+The app now includes baseline security protections:
+
+- Validates selected files are real PDFs (header check + extension).
+- Warns before opening very large PDFs (100 MB+) to reduce resource abuse risk.
+- Blocks password-protected PDFs in the editor flow.
+- Uses restricted-permission temp files for signing operations.
+- Requires certificate files to be `.p12` or `.pfx`.
+- Clears certificate passwords from memory after signing attempt.
+- Prevents overwriting the currently open input PDF during signing output.

@@ -16,6 +16,9 @@ except ImportError:
     HAS_PYHANKO = False
 
 
+MAX_PDF_SIZE_MB = 100
+
+
 class SignaturePad(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -108,6 +111,28 @@ class PDFEditorApp:
 
         self._build_ui()
 
+    @staticmethod
+    def _looks_like_pdf(path):
+        if not path.lower().endswith(".pdf"):
+            return False
+
+        try:
+            with open(path, "rb") as infile:
+                header = infile.read(5)
+            return header == b"%PDF-"
+        except OSError:
+            return False
+
+    @staticmethod
+    def _secure_temp_path(suffix):
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            temp_path = tmp.name
+
+        # Restrict temp file visibility to current user where supported.
+        if os.name != "nt":
+            os.chmod(temp_path, 0o600)
+        return temp_path
+
     def _build_ui(self):
         toolbar = tk.Frame(self.root, bd=1, relief=tk.FLAT, padx=6, pady=6)
         toolbar.pack(fill=tk.X)
@@ -155,8 +180,34 @@ class PDFEditorApp:
         path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
         if not path:
             return
+
+        if not os.path.isfile(path) or not self._looks_like_pdf(path):
+            messagebox.showerror("Open Error", "Selected file is not a valid PDF.")
+            return
+
+        file_size_mb = os.path.getsize(path) / (1024 * 1024)
+        if file_size_mb > MAX_PDF_SIZE_MB:
+            continue_open = messagebox.askyesno(
+                "Large PDF Warning",
+                f"This PDF is {file_size_mb:.1f} MB. Continue opening it?",
+            )
+            if not continue_open:
+                return
+
         try:
-            self.doc = fitz.open(path)
+            new_doc = fitz.open(path)
+            if new_doc.needs_pass:
+                messagebox.showwarning(
+                    "Encrypted PDF",
+                    "This PDF is password-protected. Open unencrypted PDFs only.",
+                )
+                new_doc.close()
+                return
+
+            if self.doc is not None:
+                self.doc.close()
+
+            self.doc = new_doc
             self.pdf_path = path
             self.page_index = 0
             self.zoom = 1.2
@@ -300,10 +351,10 @@ class PDFEditorApp:
             messagebox.showerror("Save Error", f"Failed to save PDF:\n{exc}")
 
     @staticmethod
-    def _sign_with_pkcs12(input_pdf, output_pdf, cert_path, cert_password, page_number=None, total_pages=None):
+    def _sign_with_pkcs12(input_pdf, output_pdf, cert_path, passphrase_bytes, page_number=None, total_pages=None):
         signer = signers.SimpleSigner.load_pkcs12(
             pfx_file=cert_path,
-            passphrase=cert_password.encode("utf-8"),
+            passphrase=bytes(passphrase_bytes),
         )
         if signer is None:
             raise ValueError("Could not load certificate. Check the file and password.")
@@ -351,13 +402,21 @@ class PDFEditorApp:
         if not cert_path:
             return
 
-        cert_password = simpledialog.askstring(
+        cert_lower = cert_path.lower()
+        if not cert_lower.endswith(".p12") and not cert_lower.endswith(".pfx"):
+            messagebox.showerror("Certificate Error", "Certificate must be a .p12 or .pfx file.")
+            return
+
+        cert_password_str = simpledialog.askstring(
             "Certificate Password",
             "Enter the password for your .p12/.pfx certificate:",
             show="*",
         )
-        if cert_password is None:
+        if cert_password_str is None:
             return
+
+        cert_password = bytearray(cert_password_str.encode("utf-8"))
+        cert_password_str = None
 
         visible_signature = messagebox.askyesno(
             "Visible Signature",
@@ -383,10 +442,17 @@ class PDFEditorApp:
             filetypes=[("PDF files", "*.pdf")],
         )
         if not out_path:
+            for idx in range(len(cert_password)):
+                cert_password[idx] = 0
             return
 
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
-            temp_input_path = tmp_pdf.name
+        if self.pdf_path and os.path.abspath(out_path) == os.path.abspath(self.pdf_path):
+            messagebox.showerror("Signing Error", "Choose a different output file for signed PDF.")
+            for idx in range(len(cert_password)):
+                cert_password[idx] = 0
+            return
+
+        temp_input_path = self._secure_temp_path(".pdf")
 
         try:
             # Save in-memory edits first, then apply cryptographic signature.
@@ -409,6 +475,8 @@ class PDFEditorApp:
         except (RuntimeError, ValueError, OSError) as exc:
             messagebox.showerror("Signing Error", f"Failed to digitally sign PDF:\n{exc}")
         finally:
+            for idx in range(len(cert_password)):
+                cert_password[idx] = 0
             if os.path.exists(temp_input_path):
                 os.remove(temp_input_path)
 
