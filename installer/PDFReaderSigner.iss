@@ -12,7 +12,7 @@ AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
-OutputDir=installer-output
+OutputDir=..\installer-output
 OutputBaseFilename=PDFReaderSigner-Setup
 Compression=lzma
 SolidCompression=yes
@@ -26,7 +26,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "dist\PDFReaderSigner\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+Source: "..\dist\PDFReaderSigner\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
